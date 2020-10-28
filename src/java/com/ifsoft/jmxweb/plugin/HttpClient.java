@@ -23,7 +23,7 @@ public class HttpClient {
             String username = JiveGlobals.getProperty("jmxweb.admin.username", "admin");
             String password = JiveGlobals.getProperty("jmxweb.admin.password", "admin");
 
-            URL url = new URL("http://" + username + ":" + password + "@" + host + ":" + port + "/jolokia/read/java.lang:type=Memory/HeapMemoryUsage");
+            URL url = new URL("http://" + username + ":" + password + "@" + host + ":" + port + "/hawtio/jolokia/read/java.lang:type=Memory/HeapMemoryUsage");
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Accept", "application/json");
