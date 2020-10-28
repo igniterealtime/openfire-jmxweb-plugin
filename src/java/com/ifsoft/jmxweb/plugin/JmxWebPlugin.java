@@ -16,38 +16,28 @@
 
 package com.ifsoft.jmxweb.plugin;
 
-import org.jivesoftware.openfire.XMPPServer;
-import org.jivesoftware.openfire.container.Plugin;
-import org.jivesoftware.openfire.container.PluginManager;
-import org.jivesoftware.openfire.spi.ConnectionManagerImpl;
-import org.jivesoftware.util.*;
-import org.jivesoftware.openfire.http.HttpBindManager;
-
-import java.io.File;
-import java.util.*;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import org.apache.jasper.servlet.JasperInitializer;
-
-import org.eclipse.jetty.plus.annotation.ContainerInitializer;
-import org.eclipse.jetty.webapp.WebAppContext;
-import org.eclipse.jetty.util.security.*;
-import org.eclipse.jetty.security.*;
-import org.eclipse.jetty.security.authentication.*;
-
-import java.io.File;
-
 import com.javamonitor.JmxHelper;
 import com.javamonitor.openfire.mbeans.CoreThreadPool;
 import com.javamonitor.openfire.mbeans.DatabasePool;
 import com.javamonitor.openfire.mbeans.Openfire;
 import com.javamonitor.openfire.mbeans.PacketCounter;
-import com.ifsoft.jmxweb.plugin.EmailScheduler;
+import org.eclipse.jetty.security.ConstraintMapping;
+import org.eclipse.jetty.security.ConstraintSecurityHandler;
+import org.eclipse.jetty.security.SecurityHandler;
+import org.eclipse.jetty.security.authentication.BasicAuthenticator;
+import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.util.security.Constraint;
+import org.eclipse.jetty.webapp.WebAppContext;
+import org.jivesoftware.openfire.XMPPServer;
+import org.jivesoftware.openfire.container.Plugin;
+import org.jivesoftware.openfire.container.PluginManager;
+import org.jivesoftware.openfire.http.HttpBindManager;
+import org.jivesoftware.openfire.spi.ConnectionManagerImpl;
+import org.jivesoftware.util.JiveGlobals;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import org.apache.tomcat.InstanceManager;
-import org.apache.tomcat.SimpleInstanceManager;
+import java.io.File;
 
 
 public class JmxWebPlugin implements Plugin  {
@@ -67,7 +57,6 @@ public class JmxWebPlugin implements Plugin  {
     private DatabasePool database = null;
     private EmailScheduler emailScheduler = null;
     private WebAppContext context;
-    private WebAppContext context2;
 
     public void initializePlugin(PluginManager manager, File pluginDirectory) {
         Log.info( "["+ NAME + "] initialize " + NAME + " plugin resources");
@@ -115,32 +104,28 @@ public class JmxWebPlugin implements Plugin  {
         try {
 
             try {
-                Log.info( "["+ NAME + "] starting jolokia");
-                context = new WebAppContext(null, pluginDirectory.getPath() + "/classes", "/jolokia");
-                final List<ContainerInitializer> initializers = new ArrayList<>();
-                initializers.add(new ContainerInitializer(new JasperInitializer(), null));
-                context.setAttribute("org.eclipse.jetty.containerInitializers", initializers);
-                context.setAttribute(InstanceManager.class.getName(), new SimpleInstanceManager());
-                context.setWelcomeFiles(new String[]{"index.html"});
+                System.setProperty("hawtio.realm", "realm1");
+
+                // Enable parsing of jndi-related parts of web.xml and jetty-env.xml, by getting the classlist representing the default configuration
+                // of a server, augmenting it with additional configuration that adds support for working with the jndi-parts in web.xml / jetty-env.xml
+                org.eclipse.jetty.webapp.Configuration.ClassList classlist = org.eclipse.jetty.webapp.Configuration.ClassList.serverDefault(new Server()); // TODO can we do this without instantiating a server that we're not going to use anyway?
+                classlist.addAfter("org.eclipse.jetty.webapp.FragmentConfiguration", "org.eclipse.jetty.plus.webapp.EnvConfiguration", "org.eclipse.jetty.plus.webapp.PlusConfiguration");
 
                 Log.info( "["+ NAME + "] starting hawtio");
-                context2 = new WebAppContext(null, pluginDirectory.getPath() + "/classes/hawtio", "/hawtio");
-                final List<ContainerInitializer> initializers2 = new ArrayList<>();
-                initializers2.add(new ContainerInitializer(new JasperInitializer(), null));
-                context2.setAttribute("org.eclipse.jetty.containerInitializers", initializers2);
-                context2.setAttribute(InstanceManager.class.getName(), new SimpleInstanceManager());
-                context2.setWelcomeFiles(new String[]{"index.html"});
+                context = new WebAppContext();
+                context.setContextPath("/hawtio");
+                // Load the war file that's pulled in as a Maven dependency.
+                context.setWar( pluginDirectory.getPath() + File.separator + "lib"+ File.separator + "hawtio-default-2.11.1.war" );
+                context.setConfigurationClasses(classlist);
+
+                // Make use of the jndi to configure hawtio. We're disabling the in-app auth, only to replace it with basic authentication on the context.
+                context.setInitParameter("hawtio/authenticationEnabled", "false");
 
                 if (JiveGlobals.getBooleanProperty("xmpp.jmx.secure", true))
                 {
-                    SecurityHandler securityHandler = basicAuth("jmxweb");
-                    if (securityHandler != null) context.setSecurityHandler(securityHandler);
-
-                    SecurityHandler securityHandler2 = basicAuth("jmxweb");
-                    if (securityHandler2 != null) context2.setSecurityHandler(securityHandler2);
+                    context.setSecurityHandler(basicAuth("jmxweb"));
                 }
-                HttpBindManager.getInstance().addJettyHandler( context );
-                HttpBindManager.getInstance().addJettyHandler( context2 );
+                HttpBindManager.getInstance().addJettyHandler(context);
             }
             catch(Exception e) {
                 Log.error( "An error has occurred", e );
@@ -188,8 +173,7 @@ public class JmxWebPlugin implements Plugin  {
             emailScheduler.stopMonitoring();
         }
 
-        HttpBindManager.getInstance().removeJettyHandler( context );
-        HttpBindManager.getInstance().removeJettyHandler( context2 );
+        HttpBindManager.getInstance().removeJettyHandler(context);
 
         Log.info("["+ NAME + "]  plugin fully destroyed.");
     }
