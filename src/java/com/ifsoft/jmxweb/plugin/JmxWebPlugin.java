@@ -21,6 +21,7 @@ import com.javamonitor.openfire.mbeans.CoreThreadPool;
 import com.javamonitor.openfire.mbeans.DatabasePool;
 import com.javamonitor.openfire.mbeans.Openfire;
 import com.javamonitor.openfire.mbeans.PacketCounter;
+import org.apache.mina.transport.socket.nio.NioSocketAcceptor;
 import org.eclipse.jetty.security.ConstraintMapping;
 import org.eclipse.jetty.security.ConstraintSecurityHandler;
 import org.eclipse.jetty.security.SecurityHandler;
@@ -38,6 +39,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.time.Duration;
+import java.time.Instant;
 
 
 public class JmxWebPlugin implements Plugin  {
@@ -67,7 +70,7 @@ public class JmxWebPlugin implements Plugin  {
             JmxHelper.register(openfire, OBJECTNAME_OPENFIRE);
             Log.info( "["+ NAME + "] .. started openfire server detector.");
         } catch (Exception e) {
-            Log.debug("cannot start openfire server detector: "  + e.getMessage(), e);
+            Log.warn("cannot start openfire server detector: "  + e.getMessage(), e);
         }
 
         try {
@@ -77,19 +80,37 @@ public class JmxWebPlugin implements Plugin  {
 
             Log.info( "["+ NAME + "] .. started stanza counter.");
         } catch (Exception e) {
-            Log.debug("cannot start stanza counter: " + e.getMessage(), e);
+            Log.warn("cannot start stanza counter: " + e.getMessage(), e);
         }
 
-        try {
-            client = new CoreThreadPool(((ConnectionManagerImpl) XMPPServer
-                    .getInstance().getConnectionManager()).getSocketAcceptor());
-            client.start();
-            JmxHelper.register(client, OBJECTNAME_CORE_CLIENT_THREADPOOL);
+        // The socket acceptors are not started until _after_ the plugins have been started. This ensures that the
+        // socket acceptor is null when invoking this. To work around that, register the MBean in an asynchronous process.
+        Thread ascynStartThread = new Thread(() -> {
+            try {
+                // We'll have to wait until all plugins have been started. As we don't know what plugins are loaded, lets be generous.
+                final Duration maxDuration = Duration.ofMillis(JiveGlobals.getLongProperty("jmxweb.socket-acceptor.max-init-duration", Duration.ofMinutes(10).toMillis()));
+                final Instant start = Instant.now();
+                NioSocketAcceptor socketAcceptor = null;
+                while (Duration.between(start, Instant.now()).compareTo(maxDuration) < 0) {
+                    socketAcceptor = ((ConnectionManagerImpl) XMPPServer
+                        .getInstance().getConnectionManager()).getSocketAcceptor();
+                    if (socketAcceptor != null) {
+                        break;
+                    }
+                    Log.trace("Delaying client thread pool monitor start until socket acceptor has been started.");
+                    Thread.sleep(100);
+                }
 
-            Log.info( "["+ NAME + "] .. started client thread pool monitor.");
-        } catch (Exception e) {
-            Log.debug("cannot start client thread pool monitor: " + e.getMessage(), e);
-        }
+                client = new CoreThreadPool(socketAcceptor);
+                client.start();
+                JmxHelper.register(client, OBJECTNAME_CORE_CLIENT_THREADPOOL);
+
+                Log.info( "["+ NAME + "] .. started client thread pool monitor.");
+            } catch (Exception e) {
+                Log.warn("cannot start client thread pool monitor: " + e.getMessage(), e);
+            }
+        });
+        ascynStartThread.start();
 
         try {
             database = new DatabasePool();
@@ -98,7 +119,7 @@ public class JmxWebPlugin implements Plugin  {
 
             Log.info( "["+ NAME + "] .. started database pool monitor.");
         } catch (Exception e) {
-            Log.debug("cannot start database pool monitor: " + e.getMessage(), e);
+            Log.warn("cannot start database pool monitor: " + e.getMessage(), e);
         }
 
         try {
