@@ -6,7 +6,7 @@
     <description>JmxWeb plugin is web based platform for managing and monitoring openfire via JMX.</description>
     <version>${project.version}</version>
     <licenseType>Apache 2.0</licenseType>    
-    <date>05/09/2018</date>
+    <date>08/04/2021</date>
     <minServerVersion>4.3.0</minServerVersion>
     <minJavaVersion>1.8</minJavaVersion>
     <author>igniterealtime.org</author>
